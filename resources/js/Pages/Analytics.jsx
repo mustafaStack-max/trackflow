@@ -3,10 +3,10 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Panel, { EmptyState } from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 
-// المكونات الجديدة
 import AnalyticsHeader from '@/Components/Analytics/AnalyticsHeader';
 import AnalyticsKpis from '@/Components/Analytics/AnalyticsKpis';
 import ChangeAnalysisTable from '@/Components/Analytics/ChangeAnalysisTable';
+import TrendChart from '@/Components/Analytics/TrendChart';
 
 export default function Analytics({
     range = '90d',
@@ -49,14 +49,8 @@ export default function Analytics({
         );
     };
 
-    // الأقسام المتبقية (T11, T12)
+    // 🔥 حذفنا "الاتجاهات الشهرية" من هنا لأنها بُنيت فعليًا الآن
     const nextSections = [
-        {
-            title: 'الاتجاهات الشهرية',
-            ready: trends.length > 0,
-            task: 'T11',
-            message: '// مخطط الاتجاهات الشهرية سيُبنى هنا //',
-        },
         {
             title: 'تركيز المصاريف',
             ready: Boolean(concentration),
@@ -94,7 +88,7 @@ export default function Analytics({
                     periodLabel={periodLabel}
                 />
 
-                {/* 🔥 القسم الجديد: لماذا تغيّر صرفك؟ (T10) */}
+                {/* 🔥 القسم: لماذا تغيّر صرفك؟ (T10) */}
                 <Panel 
                     title="لماذا تغيّر صرفك؟" 
                     badge={
@@ -120,7 +114,20 @@ export default function Analytics({
                     <ChangeAnalysisTable data={changeAnalysis} />
                 </Panel>
 
-                {/* الأقسام المتبقية (T11, T12) */}
+                {/* 🔥 القسم الجديد: الاتجاهات الشهرية (T11) - يأخذ العرض الكامل */}
+                <Panel 
+                    title="الاتجاهات الشهرية" 
+                    badge={periodLabel}
+                    right={
+                        <span className={`${F.mono} text-[0.6rem] tracking-[1px]`} style={{ color: C.t4 }}>
+                            {trends.length} شهر
+                        </span>
+                    }
+                >
+                    <TrendChart data={trends} />
+                </Panel>
+
+                {/* الأقسام المتبقية (T12) */}
                 <div className="grid lg:grid-cols-2 gap-5">
                     {nextSections.map((section) => (
                         <Panel
