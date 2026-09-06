@@ -18,8 +18,8 @@ const NAV_GROUPS = [
             /* ★★ مفعّلة الآن — الصفحات موجودة ★★ */
             { key: 'budgets', label: 'الميزانيات', routeName: 'budgets.index', icon: 'card' },
             { key: 'categories', label: 'التصنيفات', routeName: 'categories.index', icon: 'tag' },
+            { key: 'analytics', label: 'التحليلات', routeName: 'analytics.index', icon: 'chart' },
             /* باقي العناصر تبقى قريبًا */
-            { key: 'analytics', label: 'التحليلات', routeName: 'analytics.index', icon: 'chart', soon: true },
             { key: 'goals', label: 'الأهداف المالية', routeName: 'goals.index', icon: 'target', soon: true },
             { key: 'audit', label: 'سجل العمليات', routeName: 'audit.index', icon: 'clock', soon: true },
         ],
