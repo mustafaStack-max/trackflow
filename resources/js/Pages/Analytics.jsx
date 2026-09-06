@@ -3,6 +3,26 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Panel from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 
+function Placeholder({ title, ready = false, children = null }) {
+    return (
+        <Panel
+            title={title}
+            badge={ready ? 'READY' : 'PENDING'}
+        >
+            {children ? (
+                children
+            ) : (
+                <div
+                    className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
+                    style={{ color: C.t4 }}
+                >
+  
+                </div>
+            )}
+        </Panel>
+    );
+}
+
 export default function Analytics({
     range = '90d',
     customFrom = null,
@@ -54,15 +74,57 @@ export default function Analytics({
                     </div>
                 </div>
 
-                {/* MAIN PANEL */}
-                <Panel title="التحليلات" badge={periodLabel}>
+                {/* OVERVIEW */}
+                <Placeholder title="الصحة المالية" ready={overview !== null}>
                     <div
-                        className={`${F.mono} text-center py-16 text-[0.7rem] tracking-[2px]`}
+                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
                         style={{ color: C.t4 }}
                     >
-                        // منطق الفترات جاهز — الخطوة التالية هي بناء AnalyticsService //
+      
                     </div>
-                </Panel>
+                </Placeholder>
+
+                {/* CHANGE ANALYSIS */}
+                <Placeholder title="لماذا تغيّر صرفك؟" ready={changeAnalysis !== null}>
+                    <div
+                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
+                        style={{ color: C.t4 }}
+                    >
+        
+                    </div>
+                </Placeholder>
+
+                {/* TRENDS */}
+                <Placeholder title="الاتجاهات الشهرية" ready={trends.length > 0}>
+                    <div
+                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
+                        style={{ color: C.t4 }}
+                    >
+ 
+                    </div>
+                </Placeholder>
+
+                <div className="grid lg:grid-cols-2 gap-5">
+                    {/* CONCENTRATION */}
+                    <Placeholder title="تركيز المصاريف" ready={concentration !== null}>
+                        <div
+                            className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
+                            style={{ color: C.t4 }}
+                        >
+                    
+                        </div>
+                    </Placeholder>
+
+                    {/* INSIGHTS */}
+                    <Placeholder title="التوصيات الذكية" ready={insights.length > 0}>
+                        <div
+                            className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
+                            style={{ color: C.t4 }}
+                        >
+     
+                        </div>
+                    </Placeholder>
+                </div>
             </div>
         </AuthenticatedLayout>
     );
