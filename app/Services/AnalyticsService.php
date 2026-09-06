@@ -334,11 +334,87 @@ protected function trends(User $user, array $meta): array
 }
 
 
-    protected function concentration(User $user, array $meta): ?array
-    {
-    
-        return null;
+/**
+ * T7 — تركيز المصاريف.
+ */
+protected function concentration(User $user, array $meta): array
+{
+    $since = $meta['since'];
+    $until = $meta['until'];
+
+    $rows = $user->transactions()
+        ->leftJoin('categories', 'transactions.category_id', '=', 'categories.id')
+        ->where('transactions.type', 'expense')
+        ->whereBetween('transactions.transaction_date', [$since, $until])
+        ->select(
+            'transactions.category_id',
+            'categories.name',
+            'categories.color_hex',
+            DB::raw('COALESCE(SUM(transactions.amount), 0) as total'),
+            DB::raw('COUNT(transactions.id) as transactions_count')
+        )
+        ->groupBy('transactions.category_id', 'categories.name', 'categories.color_hex')
+        ->orderByDesc('total')
+        ->get();
+
+    $totalExpense = (float) $rows->sum('total');
+
+    $categories = $rows
+        ->map(function ($row) use ($totalExpense) {
+            $total = (float) $row->total;
+
+            return [
+                'id' => $row->category_id,
+                'name' => $row->name ?? 'غير مصنف',
+                'color_hex' => $row->color_hex ?? '#5a8068',
+                'total' => round($total, 2),
+                'count' => (int) $row->transactions_count,
+                'pct' => $totalExpense > 0
+                    ? round(($total / $totalExpense) * 100, 1)
+                    : 0.0,
+            ];
+        })
+        ->filter(fn ($category) => $category['total'] > 0)
+        ->sortByDesc('total')
+        ->values();
+
+    $top3 = $categories->take(3)->all();
+
+    $top3Total = collect($top3)->sum('total');
+
+    $top3Share = $totalExpense > 0
+        ? round(($top3Total / $totalExpense) * 100, 1)
+        : 0.0;
+
+    $status = match (true) {
+        $top3Share >= 60 => 'high',
+        $top3Share >= 40 => 'medium',
+        default => 'healthy',
+    };
+
+    return [
+        'totalExpense' => round($totalExpense, 2),
+        'categoriesCount' => $categories->count(),
+        'top3' => $top3,
+        'top3Share' => $top3Share,
+        'status' => $status,
+        'message' => $this->concentrationMessage($status, $top3Share),
+    ];
+}
+
+
+protected function concentrationMessage(string $status, float $top3Share): string
+{
+    if ($top3Share <= 0) {
+        return 'لا توجد مصاريف كافية لتحليل التركيز.';
     }
+
+    return match ($status) {
+        'high' => "تركيز مرتفع: {$top3Share}% من مصاريفك تذهب إلى أكبر 3 تصنيفات فقط.",
+        'medium' => "تركيز متوسط: {$top3Share}% من مصاريفك تذهب إلى أكبر 3 تصنيفات.",
+        default => "توزيع المصاريف جيد نسبيًا عبر التصنيفات.",
+    };
+}
 
   
     protected function insights(User $user, array $meta): array
