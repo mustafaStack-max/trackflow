@@ -1,12 +1,14 @@
 import { Head, router } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import Panel, { EmptyState } from '@/Components/Dashboard/Panel';
+import Panel from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 
 import AnalyticsHeader from '@/Components/Analytics/AnalyticsHeader';
 import AnalyticsKpis from '@/Components/Analytics/AnalyticsKpis';
 import ChangeAnalysisTable from '@/Components/Analytics/ChangeAnalysisTable';
 import TrendChart from '@/Components/Analytics/TrendChart';
+import ConcentrationPanel from '@/Components/Analytics/ConcentrationPane';
+import InsightsList from '@/Components/Analytics/InsightsList';
 
 export default function Analytics({
     range = '90d',
@@ -49,22 +51,6 @@ export default function Analytics({
         );
     };
 
-    // 🔥 حذفنا "الاتجاهات الشهرية" من هنا لأنها بُنيت فعليًا الآن
-    const nextSections = [
-        {
-            title: 'تركيز المصاريف',
-            ready: Boolean(concentration),
-            task: 'T12',
-            message: '// لوحة تركيز المصاريف ستُبنى هنا //',
-        },
-        {
-            title: 'التوصيات الذكية',
-            ready: insights.length > 0,
-            task: 'T12',
-            message: '// التوصيات الذكية ستُبنى هنا //',
-        },
-    ];
-
     return (
         <AuthenticatedLayout>
             <Head title="التحليلات" />
@@ -88,25 +74,32 @@ export default function Analytics({
                     periodLabel={periodLabel}
                 />
 
-                {/* 🔥 القسم: لماذا تغيّر صرفك؟ (T10) */}
-                <Panel 
-                    title="لماذا تغيّر صرفك؟" 
+                {/* T10: لماذا تغيّر صرفك؟ */}
+                <Panel
+                    title="لماذا تغيّر صرفك؟"
                     badge={
-                        changeAnalysis 
-                            ? (changeAnalysis.direction === 'up' ? 'ارتفاع' : changeAnalysis.direction === 'down' ? 'انخفاض' : 'مستقر') 
+                        changeAnalysis
+                            ? (
+                                changeAnalysis.direction === 'up'
+                                    ? 'ارتفاع'
+                                    : changeAnalysis.direction === 'down'
+                                        ? 'انخفاض'
+                                        : 'مستقر'
+                            )
                             : 'PENDING'
                     }
                     right={
                         changeAnalysis && changeAnalysis.totalChangePct !== null ? (
-                            <span 
-                                className={`${F.mono} text-[0.75rem] font-bold px-2 py-0.5 border rounded`} 
-                                style={{ 
-                                    borderColor: `${changeAnalysis.direction === 'up' ? C.red : C.green}44`, 
+                            <span
+                                className={`${F.mono} text-[0.75rem] font-bold px-2 py-0.5 border rounded`}
+                                style={{
+                                    borderColor: `${changeAnalysis.direction === 'up' ? C.red : C.green}44`,
                                     color: changeAnalysis.direction === 'up' ? C.red : C.green,
-                                    background: `${changeAnalysis.direction === 'up' ? C.red : C.green}10`
+                                    background: `${changeAnalysis.direction === 'up' ? C.red : C.green}10`,
                                 }}
                             >
-                                {changeAnalysis.totalChange > 0 ? '+' : ''}{changeAnalysis.totalChangePct}%
+                                {changeAnalysis.totalChange > 0 ? '+' : ''}
+                                {changeAnalysis.totalChangePct}%
                             </span>
                         ) : null
                     }
@@ -114,12 +107,15 @@ export default function Analytics({
                     <ChangeAnalysisTable data={changeAnalysis} />
                 </Panel>
 
-                {/* 🔥 القسم الجديد: الاتجاهات الشهرية (T11) - يأخذ العرض الكامل */}
-                <Panel 
-                    title="الاتجاهات الشهرية" 
+                {/* T11: الاتجاهات الشهرية */}
+                <Panel
+                    title="الاتجاهات الشهرية"
                     badge={periodLabel}
                     right={
-                        <span className={`${F.mono} text-[0.6rem] tracking-[1px]`} style={{ color: C.t4 }}>
+                        <span
+                            className={`${F.mono} text-[0.6rem] tracking-[1px]`}
+                            style={{ color: C.t4 }}
+                        >
                             {trends.length} شهر
                         </span>
                     }
@@ -127,19 +123,55 @@ export default function Analytics({
                     <TrendChart data={trends} />
                 </Panel>
 
-                {/* الأقسام المتبقية (T12) */}
+                {/* T12: تركيز المصاريف + التوصيات الذكية */}
                 <div className="grid lg:grid-cols-2 gap-5">
-                    {nextSections.map((section) => (
-                        <Panel
-                            key={section.title}
-                            title={section.title}
-                            badge={section.ready ? 'READY' : 'PENDING'}
-                        >
-                            <EmptyState>
-                                {section.message}
-                            </EmptyState>
-                        </Panel>
-                    ))}
+                    <Panel
+                        title="تركيز المصاريف"
+                        badge={
+                            concentration
+                                ? (
+                                    concentration.status === 'high'
+                                        ? 'خطر'
+                                        : concentration.status === 'medium'
+                                            ? 'متوسط'
+                                            : 'صحي'
+                                )
+                                : 'PENDING'
+                        }
+                        right={
+                            concentration ? (
+                                <span
+                                    className={`${F.mono} text-[0.6rem] tracking-[1px]`}
+                                    style={{ color: C.t4 }}
+                                >
+                                    {concentration.categoriesCount} تصنيف
+                                </span>
+                            ) : null
+                        }
+                    >
+                        <ConcentrationPanel data={concentration} />
+                    </Panel>
+
+                    <Panel
+                        title="التوصيات الذكية"
+                        badge={insights.length > 0 ? `${insights.length} توصية` : 'PENDING'}
+                        right={
+                            insights.length > 0 && insights.some((i) => i.type === 'danger') ? (
+                                <span
+                                    className={`${F.mono} text-[0.6rem] font-bold tracking-[1px] px-2 py-0.5 border rounded`}
+                                    style={{
+                                        borderColor: 'rgba(255,92,92,0.4)',
+                                        color: '#ff5c5c',
+                                        background: 'rgba(255,92,92,0.1)',
+                                    }}
+                                >
+                                    انتبه
+                                </span>
+                            ) : null
+                        }
+                    >
+                        <InsightsList insights={insights} />
+                    </Panel>
                 </div>
             </div>
         </AuthenticatedLayout>
