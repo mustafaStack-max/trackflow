@@ -3,8 +3,10 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Panel, { EmptyState } from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 
+// المكونات الجديدة
 import AnalyticsHeader from '@/Components/Analytics/AnalyticsHeader';
 import AnalyticsKpis from '@/Components/Analytics/AnalyticsKpis';
+import ChangeAnalysisTable from '@/Components/Analytics/ChangeAnalysisTable';
 
 export default function Analytics({
     range = '90d',
@@ -47,13 +49,8 @@ export default function Analytics({
         );
     };
 
+    // الأقسام المتبقية (T11, T12)
     const nextSections = [
-        {
-            title: 'لماذا تغيّر صرفك؟',
-            ready: Boolean(changeAnalysis),
-            task: 'T10',
-            message: '// جدول مقارنة التصنيفات سيُبنى هنا //',
-        },
         {
             title: 'الاتجاهات الشهرية',
             ready: trends.length > 0,
@@ -97,7 +94,33 @@ export default function Analytics({
                     periodLabel={periodLabel}
                 />
 
-                {/* NEXT SECTIONS PLACEHOLDERS */}
+                {/* 🔥 القسم الجديد: لماذا تغيّر صرفك؟ (T10) */}
+                <Panel 
+                    title="لماذا تغيّر صرفك؟" 
+                    badge={
+                        changeAnalysis 
+                            ? (changeAnalysis.direction === 'up' ? 'ارتفاع' : changeAnalysis.direction === 'down' ? 'انخفاض' : 'مستقر') 
+                            : 'PENDING'
+                    }
+                    right={
+                        changeAnalysis && changeAnalysis.totalChangePct !== null ? (
+                            <span 
+                                className={`${F.mono} text-[0.75rem] font-bold px-2 py-0.5 border rounded`} 
+                                style={{ 
+                                    borderColor: `${changeAnalysis.direction === 'up' ? C.red : C.green}44`, 
+                                    color: changeAnalysis.direction === 'up' ? C.red : C.green,
+                                    background: `${changeAnalysis.direction === 'up' ? C.red : C.green}10`
+                                }}
+                            >
+                                {changeAnalysis.totalChange > 0 ? '+' : ''}{changeAnalysis.totalChangePct}%
+                            </span>
+                        ) : null
+                    }
+                >
+                    <ChangeAnalysisTable data={changeAnalysis} />
+                </Panel>
+
+                {/* الأقسام المتبقية (T11, T12) */}
                 <div className="grid lg:grid-cols-2 gap-5">
                     {nextSections.map((section) => (
                         <Panel
