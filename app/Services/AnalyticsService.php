@@ -177,11 +177,103 @@ class AnalyticsService
     }
 
 
-    protected function changeAnalysis(User $user, array $meta): ?array
-    {
-   
-        return null;
-    }
+/**
+ * T5 — تحليل المقارنة بين الفترة الحالية والسابقة.
+ */
+protected function changeAnalysis(User $user, array $meta): array
+{
+    $since = $meta['since'];
+    $until = $meta['until'];
+
+    $prevSince = $meta['previous_since'];
+    $prevUntil = $meta['previous_until'];
+
+    $currentStart = $since->format('Y-m-d H:i:s');
+    $currentEnd = $until->format('Y-m-d H:i:s');
+
+    $previousStart = $prevSince->format('Y-m-d H:i:s');
+    $previousEnd = $prevUntil->format('Y-m-d H:i:s');
+
+    $rows = $user->transactions()
+        ->leftJoin('categories', 'transactions.category_id', '=', 'categories.id')
+        ->where('transactions.type', 'expense')
+        ->whereBetween('transactions.transaction_date', [$prevSince, $until])
+        ->selectRaw("
+            transactions.category_id,
+            categories.name,
+            categories.color_hex,
+            COALESCE(SUM(CASE WHEN transactions.transaction_date BETWEEN ? AND ? THEN transactions.amount ELSE 0 END), 0) as current_total,
+            COALESCE(SUM(CASE WHEN transactions.transaction_date BETWEEN ? AND ? THEN transactions.amount ELSE 0 END), 0) as previous_total
+        ", [
+            $currentStart,
+            $currentEnd,
+            $previousStart,
+            $previousEnd,
+        ])
+        ->groupBy('transactions.category_id', 'categories.name', 'categories.color_hex')
+        ->get();
+
+    $currentTotal = (float) $rows->sum('current_total');
+    $previousTotal = (float) $rows->sum('previous_total');
+
+    $totalChange = $currentTotal - $previousTotal;
+
+    $categories = $rows
+        ->map(function ($row) use ($totalChange) {
+            $current = (float) $row->current_total;
+            $previous = (float) $row->previous_total;
+
+            $diff = $current - $previous;
+
+            if ($previous <= 0 && $current > 0) {
+                $direction = 'new';
+            } elseif ($current <= 0 && $previous > 0) {
+                $direction = 'gone';
+            } elseif ($diff > 0) {
+                $direction = 'up';
+            } elseif ($diff < 0) {
+                $direction = 'down';
+            } else {
+                $direction = 'unchanged';
+            }
+
+            return [
+                'id' => $row->category_id,
+                'name' => $row->name ?? 'غير مصنف',
+                'color_hex' => $row->color_hex ?? '#5a8068',
+
+                'current' => round($current, 2),
+                'previous' => round($previous, 2),
+
+                'diff' => round($diff, 2),
+                'pct' => $this->pctChange($current, $previous),
+
+                'contribution' => abs($totalChange) > 0.001
+                    ? round(($diff / $totalChange) * 100, 1)
+                    : null,
+
+                'direction' => $direction,
+            ];
+        })
+        ->filter(fn ($category) => $category['current'] > 0 || $category['previous'] > 0)
+        ->sortByDesc(fn ($category) => abs($category['diff']))
+        ->values()
+        ->all();
+
+    return [
+        'currentTotal' => round($currentTotal, 2),
+        'previousTotal' => round($previousTotal, 2),
+
+        'totalChange' => round($totalChange, 2),
+        'totalChangePct' => $this->pctChange($currentTotal, $previousTotal),
+
+        'direction' => $totalChange > 0
+            ? 'up'
+            : ($totalChange < 0 ? 'down' : 'flat'),
+
+        'categories' => $categories,
+    ];
+}
 
 
     protected function trends(User $user, array $meta): array
