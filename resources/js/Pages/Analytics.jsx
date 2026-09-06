@@ -36,7 +36,9 @@ export default function Analytics({
     concentration = null,
     insights = [],
 }) {
+    console.log('analytics overview:', overview);
     return (
+        
         <AuthenticatedLayout>
             <Head title="التحليلات" />
 
