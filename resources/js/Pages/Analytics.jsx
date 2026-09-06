@@ -9,6 +9,7 @@ import ChangeAnalysisTable from '@/Components/Analytics/ChangeAnalysisTable';
 import TrendChart from '@/Components/Analytics/TrendChart';
 import ConcentrationPanel from '@/Components/Analytics/ConcentrationPane';
 import InsightsList from '@/Components/Analytics/InsightsList';
+import AnalyticsTrendsPanel from '@/Components/Analytics/Atp';
 
 export default function Analytics({
     range = '90d',
@@ -21,6 +22,7 @@ export default function Analytics({
     changeAnalysis = null,
     trends = [],
     concentration = null,
+    wealth = null,
     insights = [],
 }) {
     const handleRangeChange = (newRange, newCustom = null) => {
@@ -45,6 +47,7 @@ export default function Analytics({
                     'changeAnalysis',
                     'trends',
                     'concentration',
+                    'wealth',
                     'insights',
                 ],
             }
@@ -107,21 +110,12 @@ export default function Analytics({
                     <ChangeAnalysisTable data={changeAnalysis} />
                 </Panel>
 
-                {/* T11: الاتجاهات الشهرية */}
-                <Panel
-                    title="الاتجاهات الشهرية"
-                    badge={periodLabel}
-                    right={
-                        <span
-                            className={`${F.mono} text-[0.6rem] tracking-[1px]`}
-                            style={{ color: C.t4 }}
-                        >
-                            {trends.length} شهر
-                        </span>
-                    }
-                >
-                    <TrendChart data={trends} />
-                </Panel>
+{/* T11 + الثروة: تبويبات الاتجاهات وتطور الثروة */}
+<AnalyticsTrendsPanel
+    trends={trends}
+    wealth={wealth}
+    periodLabel={periodLabel}
+/>
 
                 {/* T12: تركيز المصاريف + التوصيات الذكية */}
                 <div className="grid lg:grid-cols-2 gap-5">

@@ -40,6 +40,7 @@ public function build(User $user, ?string $range = null, ?string $from = null, ?
         'changeAnalysis' => $changeAnalysis,
         'trends' => $trends,
         'concentration' => $concentration,
+        'wealth' => $this->wealthSeries($user, $meta),
 
         'insights' => $this->insights(
             $user,
@@ -734,5 +735,140 @@ protected function monthLabel(Carbon $date): string
     ];
 
     return $months[$date->month] . ' ' . $date->year;
+}
+
+/**
+ * تطور الثروة: إجمالي الأرصدة في نهاية كل شهر.
+ *
+ * المنطق (الخصم العكسي):
+ * الرصيد في تاريخ D = الرصيد الحالي − الدخل بعد D + المصاريف بعد D
+ */
+protected function wealthSeries(User $user, array $meta): array
+{
+    [$start, $end] = $this->trendBounds($meta);
+
+    $accounts = $user->accounts()->get(['id', 'balance', 'created_at']);
+
+    if ($accounts->isEmpty()) {
+        return ['current' => 0.0, 'points' => [], 'growth' => null];
+    }
+
+    $currentTotal = round((float) $accounts->sum('balance'), 2);
+
+    $monthExpr = $this->monthExpression();
+
+ 
+    $rows = $user->transactions()
+        ->where('transactions.transaction_date', '>=', $start)
+        ->selectRaw("
+            transactions.account_id as account_id,
+            {$monthExpr} as month,
+            COALESCE(SUM(CASE WHEN transactions.type = 'income' THEN transactions.amount ELSE 0 END), 0) as income,
+            COALESCE(SUM(CASE WHEN transactions.type = 'expense' THEN transactions.amount ELSE 0 END), 0) as expense
+        ")
+        ->groupBy('transactions.account_id', DB::raw($monthExpr))
+        ->get();
+
+    $perAccount = [];
+
+    foreach ($rows as $r) {
+        $perAccount[(int) $r->account_id][$r->month] = [
+            (float) $r->income,
+            (float) $r->expense,
+        ];
+    }
+
+    $months = [];
+    $cursor = $start->copy()->startOfMonth();
+
+    while ($cursor->lte($end)) {
+        $months[] = $cursor->format('Y-m');
+        $cursor->addMonthNoOverflow();
+    }
+
+  
+    $now = Carbon::now();
+
+    $points = [
+        [
+            'key' => 'start',
+            'label' => 'بداية الفترة',
+            'date' => $start->copy(),
+        ],
+    ];
+
+    foreach ($months as $m) {
+        $monthDate = Carbon::createFromFormat('Y-m', $m);
+        $isCurrent = $monthDate->endOfMonth()->gt($now);
+
+        $points[] = [
+            'key' => $m,
+            'label' => $this->monthLabel($monthDate) . ($isCurrent ? ' · حتى اليوم' : ''),
+            'date' => $monthDate->endOfMonth(),
+        ];
+    }
+
+    $totals = array_fill(0, count($points), 0.0);
+
+    foreach ($accounts as $acc) {
+        $current = (float) $acc->balance;
+        $createdAt = $acc->created_at?->startOfDay();
+
+      
+        $n = count($months);
+        $suffixIncome = array_fill(0, $n + 1, 0.0);
+        $suffixExpense = array_fill(0, $n + 1, 0.0);
+
+        for ($j = $n - 1; $j >= 0; $j--) {
+            [$inc, $exp] = $perAccount[$acc->id][$months[$j]] ?? [0.0, 0.0];
+            $suffixIncome[$j] = $suffixIncome[$j + 1] + $inc;
+            $suffixExpense[$j] = $suffixExpense[$j + 1] + $exp;
+        }
+
+        foreach ($points as $i => $p) {
+     
+            if ($createdAt && $p['date']->lt($createdAt)) {
+                continue;
+            }
+
+            if ($p['key'] === 'start') {
+                $balance = $current - $suffixIncome[0] + $suffixExpense[0];
+            } else {
+                $j = array_search($p['key'], $months, true);
+                $balance = $current - $suffixIncome[$j + 1] + $suffixExpense[$j + 1];
+            }
+
+            $totals[$i] += $balance;
+        }
+    }
+
+    $result = [];
+    $prev = null;
+
+    foreach ($points as $i => $p) {
+        $balance = round($totals[$i], 2);
+
+        $result[] = [
+            'month' => $p['key'],
+            'label' => $p['label'],
+            'balance' => $balance,
+            'change' => $prev !== null ? round($balance - $prev, 2) : null,
+        ];
+
+        $prev = $balance;
+    }
+
+    $first = $result[0]['balance'] ?? 0.0;
+
+    return [
+        'current' => $currentTotal,
+        'points' => $result,
+        'growth' => [
+            'abs' => round($currentTotal - $first, 2),
+            'pct' => $first > 0
+                ? round((($currentTotal - $first) / $first) * 100, 1)
+                : null,
+        ],
+    ];
 }
 }
