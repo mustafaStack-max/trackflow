@@ -11,33 +11,46 @@ use Illuminate\Support\Facades\DB;
 class AnalyticsService
 {
 
-    public function build(User $user, ?string $range = null, ?string $from = null, ?string $to = null): array
-    {
-        $meta = DateRangeResolver::resolveWithMeta($range, $from, $to);
+public function build(User $user, ?string $range = null, ?string $from = null, ?string $to = null): array
+{
+    $meta = DateRangeResolver::resolveWithMeta($range, $from, $to);
 
-        return [
-            'range' => $meta['range'],
-            'customFrom' => $meta['from'],
-            'customTo' => $meta['to'],
+    $overview = $this->overview($user, $meta);
+    $changeAnalysis = $this->changeAnalysis($user, $meta);
+    $trends = $this->trends($user, $meta);
+    $concentration = $this->concentration($user, $meta);
 
-            'periodLabel' => $meta['period_label'],
-            'previousPeriodLabel' => $meta['previous_label'],
+    return [
+        'range' => $meta['range'],
+        'customFrom' => $meta['from'],
+        'customTo' => $meta['to'],
 
-            'period' => [
-                'from' => $meta['period_from'],
-                'to' => $meta['period_to'],
-                'days' => $meta['days'],
-                'prevFrom' => $meta['previous_since']->format('Y-m-d'),
-                'prevTo' => $meta['previous_until']->format('Y-m-d'),
-            ],
+        'periodLabel' => $meta['period_label'],
+        'previousPeriodLabel' => $meta['previous_label'],
 
-            'overview' => $this->overview($user, $meta),
-            'changeAnalysis' => $this->changeAnalysis($user, $meta),
-            'trends' => $this->trends($user, $meta),
-            'concentration' => $this->concentration($user, $meta),
-            'insights' => $this->insights($user, $meta),
-        ];
-    }
+        'period' => [
+            'from' => $meta['period_from'],
+            'to' => $meta['period_to'],
+            'days' => $meta['days'],
+            'prevFrom' => $meta['previous_since']->format('Y-m-d'),
+            'prevTo' => $meta['previous_until']->format('Y-m-d'),
+        ],
+
+        'overview' => $overview,
+        'changeAnalysis' => $changeAnalysis,
+        'trends' => $trends,
+        'concentration' => $concentration,
+
+        'insights' => $this->insights(
+            $user,
+            $meta,
+            $overview,
+            $changeAnalysis,
+            $concentration,
+            $trends
+        ),
+    ];
+}
 
 
     protected function overview(User $user, array $meta): array
@@ -417,12 +430,230 @@ protected function concentrationMessage(string $status, float $top3Share): strin
 }
 
   
-    protected function insights(User $user, array $meta): array
-    {
-    
-        return [];
+/**
+ * T8 — التوصيات الذكية.
+ */
+protected function insights(
+    User $user,
+    array $meta,
+    array $overview,
+    array $changeAnalysis,
+    array $concentration,
+    array $trends
+): array {
+    if ($overview['txCount'] === 0) {
+        return [
+            [
+                'type' => 'info',
+                'title' => 'لا توجد بيانات كافية',
+                'message' => 'أضف معاملات مالية حتى تتمكن صفحة التحليلات من توليد توصيات ذكية.',
+                'impact' => 0,
+            ],
+        ];
     }
 
+    $insights = collect();
+
+   
+    if ($changeAnalysis['direction'] === 'up' && $changeAnalysis['totalChange'] > 0) {
+        $top = collect($changeAnalysis['categories'])->firstWhere('diff', '>', 0);
+
+        $message = $top
+            ? "ارتفعت المصاريف بمقدار {$this->money($changeAnalysis['totalChange'])} مقارنة بالفترة السابقة. أكبر مساهم في هذا الارتفاع هو «{$top['name']}» بزيادة {$this->money($top['diff'])}."
+            : "ارتفعت المصاريف بمقدار {$this->money($changeAnalysis['totalChange'])} مقارنة بالفترة السابقة.";
+
+        $isDanger = $changeAnalysis['totalChangePct'] !== null
+            && $changeAnalysis['totalChangePct'] >= 25;
+
+        $insights->push([
+            'type' => $isDanger ? 'danger' : 'warning',
+            'title' => 'ارتفاع في المصاريف',
+            'message' => $message,
+            'impact' => $changeAnalysis['totalChange'],
+        ]);
+    }
+
+
+    if ($changeAnalysis['direction'] === 'down' && $changeAnalysis['totalChange'] < 0) {
+        $top = collect($changeAnalysis['categories'])->firstWhere('diff', '<', 0);
+
+        $message = $top
+            ? "انخفضت المصاريف بمقدار {$this->money(abs($changeAnalysis['totalChange']))}. أكبر تحسن جاء من «{$top['name']}» بانخفاض {$this->money(abs($top['diff']))}."
+            : "انخفضت المصاريف بمقدار {$this->money(abs($changeAnalysis['totalChange']))} مقارنة بالفترة السابقة.";
+
+        $insights->push([
+            'type' => 'success',
+            'title' => 'انخفاض في المصاريف',
+            'message' => $message,
+            'impact' => abs($changeAnalysis['totalChange']),
+        ]);
+    }
+
+   
+    if ($overview['net'] < 0) {
+        $insights->push([
+            'type' => 'danger',
+            'title' => 'الصافي سالب',
+            'message' => "لقد صرفت أكثر من دخلك خلال هذه الفترة بمقدار {$this->money(abs($overview['net']))}.",
+            'impact' => abs($overview['net']),
+        ]);
+    }
+
+   
+    if ($overview['income'] <= 0 && $overview['expense'] > 0) {
+        $insights->push([
+            'type' => 'danger',
+            'title' => 'لا يوجد دخل مسجل',
+            'message' => 'توجد مصاريف بدون دخل مسجل في هذه الفترة، لذلك لا يمكن حساب معدل الادخار.',
+            'impact' => $overview['expense'],
+        ]);
+    } elseif ($overview['savingsRate'] !== null) {
+        if ($overview['savingsRate'] < 0) {
+            $insights->push([
+                'type' => 'danger',
+                'title' => 'معدل الادخار سالب',
+                'message' => 'أنت تصرف أكثر مما يدخل. حاول تقليل أكبر التصنيفات غير الضرورية.',
+                'impact' => abs($overview['net']),
+            ]);
+        } elseif ($overview['savingsRate'] < 10) {
+            $insights->push([
+                'type' => 'warning',
+                'title' => 'معدل الادخار منخفض',
+                'message' => "معدل الادخار الحالي هو {$overview['savingsRate']}%. يُفضّل رفعه تدريجيًا إلى 10% على الأقل.",
+                'impact' => 0,
+            ]);
+        } elseif ($overview['savingsRate'] >= 20) {
+            $insights->push([
+                'type' => 'success',
+                'title' => 'معدل ادخار جيد',
+                'message' => "معدل الادخار الحالي هو {$overview['savingsRate']}%. استمر على هذا النمط.",
+                'impact' => 0,
+            ]);
+        }
+    }
+
+
+    if ($overview['projectedExpense'] !== null && $overview['income'] > 0) {
+        if ($overview['projectedExpense'] > $overview['income']) {
+            $insights->push([
+                'type' => 'danger',
+                'title' => 'توقع بتجاوز الدخل',
+                'message' => "إذا استمر نسق الإنفاق الحالي، فستبلغ مصاريف هذا الشهر حوالي {$this->money($overview['projectedExpense'])}، أي أعلى من الدخل المسجل.",
+                'impact' => max(0, $overview['projectedExpense'] - $overview['income']),
+            ]);
+        } elseif ($overview['projectedExpense'] > $overview['income'] * 0.9) {
+            $insights->push([
+                'type' => 'warning',
+                'title' => 'اقتراب من حدود الدخل',
+                'message' => "من المتوقع أن تصل مصاريف هذا الشهر إلى {$this->money($overview['projectedExpense'])}، أي أكثر من 90% من دخلك.",
+                'impact' => max(0, $overview['income'] - $overview['projectedExpense']),
+            ]);
+        }
+    }
+
+  
+    if ($concentration['totalExpense'] > 0) {
+        if ($concentration['status'] === 'high') {
+            $insights->push([
+                'type' => 'warning',
+                'title' => 'تركيز مرتفع في المصاريف',
+                'message' => $concentration['message'],
+                'impact' => 0,
+            ]);
+        }
+
+        $topCategory = $concentration['top3'][0] ?? null;
+
+        if ($topCategory && $topCategory['pct'] >= 45) {
+            $insights->push([
+                'type' => 'warning',
+                'title' => 'تصنيف واحد يسيطر على الصرف',
+                'message' => "«{$topCategory['name']}» يستهلك {$topCategory['pct']}% من إجمالي مصاريفك.",
+                'impact' => $topCategory['total'],
+            ]);
+        }
+    }
+
+
+    $newCategory = collect($changeAnalysis['categories'])
+        ->where('direction', 'new')
+        ->where('current', '>', 0)
+        ->sortByDesc('current')
+        ->first();
+
+    if ($newCategory && $changeAnalysis['currentTotal'] > 0) {
+        $share = round(($newCategory['current'] / $changeAnalysis['currentTotal']) * 100, 1);
+
+        if ($share >= 10) {
+            $insights->push([
+                'type' => 'info',
+                'title' => 'تصنيف جديد مؤثر',
+                'message' => "ظهر التصنيف «{$newCategory['name']}» في هذه الفترة ويمثل {$share}% من المصاريف.",
+                'impact' => $newCategory['current'],
+            ]);
+        }
+    }
+
+
+    $lastThree = array_slice($trends, -3);
+
+    if (count($lastThree) === 3) {
+        $allNegative = collect($lastThree)->every(fn ($month) => ($month['net'] ?? 0) < 0);
+
+        $hasData = collect($lastThree)->contains(
+            fn ($month) => ($month['income'] ?? 0) > 0 || ($month['expense'] ?? 0) > 0
+        );
+
+        if ($allNegative && $hasData) {
+            $insights->push([
+                'type' => 'danger',
+                'title' => 'نزيف مستمر منذ 3 أشهر',
+                'message' => 'الصافي المالي سالب لآخر ثلاثة أشهر متتالية. راجع المصاريف الثابتة أو ابحث عن مصادر دخل إضافية.',
+                'impact' => abs(collect($lastThree)->sum('net')),
+            ]);
+        }
+    }
+
+  
+    if ($insights->isEmpty()) {
+        return [
+            [
+                'type' => 'info',
+                'title' => 'الوضع مستقر',
+                'message' => 'لا توجد إشارات مهمة في هذه الفترة. استمر في المتابعة.',
+                'impact' => 0,
+            ],
+        ];
+    }
+
+    $severity = fn (string $type): int => match ($type) {
+        'danger' => 0,
+        'warning' => 1,
+        'success' => 2,
+        default => 3,
+    };
+
+    return $insights
+        ->sort(function ($a, $b) use ($severity) {
+            $aSeverity = $severity($a['type']);
+            $bSeverity = $severity($b['type']);
+
+            if ($aSeverity === $bSeverity) {
+                return $b['impact'] <=> $a['impact'];
+            }
+
+            return $aSeverity <=> $bSeverity;
+        })
+        ->take(6)
+        ->values()
+        ->all();
+}
+
+
+protected function money(float $amount): string
+{
+    return number_format(round($amount), 0, '.', ',') . ' MAD';
+}
     /**
  * تحديد بداية ونهاية الأشهر الخاصة بمخطط الاتجاهات.
  */
