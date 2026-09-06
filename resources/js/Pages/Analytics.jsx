@@ -9,6 +9,7 @@ export default function Analytics({
     customTo = null,
     periodLabel = 'آخر 3 أشهر',
     previousPeriodLabel = 'الفترة السابقة',
+    period = {},
     overview = null,
     changeAnalysis = null,
     trends = [],
@@ -36,6 +37,20 @@ export default function Analytics({
                         >
                             // FINANCIAL ANALYTICS // <span style={{ color: C.green }}>{periodLabel}</span>
                         </div>
+
+                        <div
+                            className={`${F.mono} text-[0.62rem] tracking-[1px] mt-1`}
+                            style={{ color: C.t3 }}
+                        >
+                            الفترة: {period.from || '—'} ← {period.to || '—'}
+                        </div>
+
+                        <div
+                            className={`${F.mono} text-[0.62rem] tracking-[1px] mt-0.5`}
+                            style={{ color: C.t4 }}
+                        >
+                            الفترة السابقة: {period.prevFrom || '—'} ← {period.prevTo || '—'}
+                        </div>
                     </div>
                 </div>
 
@@ -45,7 +60,7 @@ export default function Analytics({
                         className={`${F.mono} text-center py-16 text-[0.7rem] tracking-[2px]`}
                         style={{ color: C.t4 }}
                     >
-                        // سيتم بناء قسم التحليلات هنا خطوة بخطوة //
+                        // منطق الفترات جاهز — الخطوة التالية هي بناء AnalyticsService //
                     </div>
                 </Panel>
             </div>
