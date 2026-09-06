@@ -276,11 +276,62 @@ protected function changeAnalysis(User $user, array $meta): array
 }
 
 
-    protected function trends(User $user, array $meta): array
-    {
-    
-        return [];
+/**
+ * T6 — الاتجاهات الشهرية.
+ */
+protected function trends(User $user, array $meta): array
+{
+    [$start, $end] = $this->trendBounds($meta);
+
+    $monthExpression = $this->monthExpression();
+
+    $rows = $user->transactions()
+        ->whereBetween('transactions.transaction_date', [$start, $end])
+        ->selectRaw("
+            {$monthExpression} as month,
+            transactions.type,
+            COALESCE(SUM(transactions.amount), 0) as total,
+            COUNT(transactions.id) as tx_count
+        ")
+        ->groupBy(DB::raw($monthExpression), 'transactions.type')
+        ->get()
+        ->groupBy('month');
+
+    $result = [];
+
+    $cursor = $start->copy()->startOfMonth();
+
+    while ($cursor->lte($end)) {
+        $key = $cursor->format('Y-m');
+
+        $monthRows = $rows->get($key, collect());
+
+        $income = (float) $monthRows->where('type', 'income')->sum('total');
+        $expense = (float) $monthRows->where('type', 'expense')->sum('total');
+        $txCount = (int) $monthRows->sum('tx_count');
+
+        $net = $income - $expense;
+
+        $result[] = [
+            'month' => $key,
+            'label' => $this->monthLabel($cursor),
+
+            'income' => round($income, 2),
+            'expense' => round($expense, 2),
+            'net' => round($net, 2),
+
+            'savingsRate' => $income > 0
+                ? round(($net / $income) * 100, 1)
+                : null,
+
+            'txCount' => $txCount,
+        ];
+
+        $cursor->addMonthNoOverflow();
     }
+
+    return $result;
+}
 
 
     protected function concentration(User $user, array $meta): ?array
@@ -295,4 +346,86 @@ protected function changeAnalysis(User $user, array $meta): array
     
         return [];
     }
+
+    /**
+ * تحديد بداية ونهاية الأشهر الخاصة بمخطط الاتجاهات.
+ */
+protected function trendBounds(array $meta): array
+{
+    $end = $meta['until']->copy()->endOfMonth();
+
+    if ($meta['range'] === 'ytd') {
+        $start = $meta['since']->copy()->startOfMonth();
+
+        return [$start, $end];
+    }
+
+    if ($meta['range'] === 'custom') {
+        $start = $meta['since']->copy()->startOfMonth();
+
+        // إذا كانت الفترة قصيرة جدًا، نعرض على الأقل 6 أشهر
+        $minStart = $end->copy()->subMonthsNoOverflow(5)->startOfMonth();
+
+        if ($start->gt($minStart)) {
+            $start = $minStart;
+        }
+
+        // لا نعرض أكثر من 24 شهرًا في النسخة الحالية
+        $maxStart = $end->copy()->subMonthsNoOverflow(23)->startOfMonth();
+
+        if ($start->lt($maxStart)) {
+            $start = $maxStart;
+        }
+
+        return [$start, $end];
+    }
+
+    $months = match ($meta['range']) {
+        '365d', 'all' => 12,
+        '6m' => 6,
+        default => 6,
+    };
+
+    $start = $end->copy()
+        ->subMonthsNoOverflow($months - 1)
+        ->startOfMonth();
+
+    return [$start, $end];
+}
+
+/**
+ * تعبير استخراج الشهر حسب نوع قاعدة البيانات.
+ */
+protected function monthExpression(): string
+{
+    return match (DB::connection()->getDriverName()) {
+        'pgsql' => "to_char(transactions.transaction_date, 'YYYY-MM')",
+        'sqlite' => "strftime('%Y-%m', transactions.transaction_date)",
+        'sqlsrv' => "FORMAT(transactions.transaction_date, 'yyyy-MM')",
+        default => "DATE_FORMAT(transactions.transaction_date, '%Y-%m')",
+    };
+}
+
+/**
+ * تسمية الشهر باللغة العربية.
+ */
+protected function monthLabel(Carbon $date): string
+{
+    $months = [
+        1 => 'ينا',
+        2 => 'فبر',
+        3 => 'مار',
+        4 => 'أبر',
+        5 => 'ماي',
+        6 => 'يون',
+        7 => 'يول',
+        8 => 'غشت',
+        9 => 'شتن',
+        10 => 'أكت',
+        11 => 'نون',
+        12 => 'دجن',
+    ];
+
+    return $months[$date->month] . ' ' . $date->year;
+}
 }
