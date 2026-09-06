@@ -1,27 +1,10 @@
-import { Head } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import Panel from '@/Components/Dashboard/Panel';
+import Panel, { EmptyState } from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 
-function Placeholder({ title, ready = false, children = null }) {
-    return (
-        <Panel
-            title={title}
-            badge={ready ? 'READY' : 'PENDING'}
-        >
-            {children ? (
-                children
-            ) : (
-                <div
-                    className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                    style={{ color: C.t4 }}
-                >
-  
-                </div>
-            )}
-        </Panel>
-    );
-}
+import AnalyticsHeader from '@/Components/Analytics/AnalyticsHeader';
+import AnalyticsKpis from '@/Components/Analytics/AnalyticsKpis';
 
 export default function Analytics({
     range = '90d',
@@ -36,96 +19,97 @@ export default function Analytics({
     concentration = null,
     insights = [],
 }) {
+    const handleRangeChange = (newRange, newCustom = null) => {
+        router.get(
+            route('analytics.index'),
+            {
+                range: newRange,
+                from: newCustom?.from || undefined,
+                to: newCustom?.to || undefined,
+            },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                only: [
+                    'range',
+                    'customFrom',
+                    'customTo',
+                    'periodLabel',
+                    'previousPeriodLabel',
+                    'period',
+                    'overview',
+                    'changeAnalysis',
+                    'trends',
+                    'concentration',
+                    'insights',
+                ],
+            }
+        );
+    };
+
+    const nextSections = [
+        {
+            title: 'لماذا تغيّر صرفك؟',
+            ready: Boolean(changeAnalysis),
+            task: 'T10',
+            message: '// جدول مقارنة التصنيفات سيُبنى هنا //',
+        },
+        {
+            title: 'الاتجاهات الشهرية',
+            ready: trends.length > 0,
+            task: 'T11',
+            message: '// مخطط الاتجاهات الشهرية سيُبنى هنا //',
+        },
+        {
+            title: 'تركيز المصاريف',
+            ready: Boolean(concentration),
+            task: 'T12',
+            message: '// لوحة تركيز المصاريف ستُبنى هنا //',
+        },
+        {
+            title: 'التوصيات الذكية',
+            ready: insights.length > 0,
+            task: 'T12',
+            message: '// التوصيات الذكية ستُبنى هنا //',
+        },
+    ];
 
     return (
-        
         <AuthenticatedLayout>
             <Head title="التحليلات" />
 
             <div dir="rtl" className="flex flex-col gap-5">
-                {/* HEADER */}
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                        <div
-                            className={`${F.head} text-[1.3rem] font-bold tracking-[3px] uppercase`}
-                            style={{ color: C.t1 }}
-                        >
-                            لوحة <em className="not-italic" style={{ color: C.green }}>التحليلات</em>
-                        </div>
+                {/* HEADER + FILTERS */}
+                <AnalyticsHeader
+                    range={range}
+                    customFrom={customFrom}
+                    customTo={customTo}
+                    periodLabel={periodLabel}
+                    previousPeriodLabel={previousPeriodLabel}
+                    period={period}
+                    onRangeChange={handleRangeChange}
+                />
 
-                        <div
-                            className={`${F.mono} text-[0.72rem] tracking-[2px] mt-1`}
-                            style={{ color: C.t4 }}
-                        >
-                            // FINANCIAL ANALYTICS // <span style={{ color: C.green }}>{periodLabel}</span>
-                        </div>
+                {/* KPI CARDS */}
+                <AnalyticsKpis
+                    overview={overview}
+                    period={period}
+                    periodLabel={periodLabel}
+                />
 
-                        <div
-                            className={`${F.mono} text-[0.62rem] tracking-[1px] mt-1`}
-                            style={{ color: C.t3 }}
-                        >
-                            الفترة: {period.from || '—'} ← {period.to || '—'}
-                        </div>
-
-                        <div
-                            className={`${F.mono} text-[0.62rem] tracking-[1px] mt-0.5`}
-                            style={{ color: C.t4 }}
-                        >
-                            الفترة السابقة: {period.prevFrom || '—'} ← {period.prevTo || '—'}
-                        </div>
-                    </div>
-                </div>
-
-                {/* OVERVIEW */}
-                <Placeholder title="الصحة المالية" ready={overview !== null}>
-                    <div
-                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                        style={{ color: C.t4 }}
-                    >
-      
-                    </div>
-                </Placeholder>
-
-                {/* CHANGE ANALYSIS */}
-                <Placeholder title="لماذا تغيّر صرفك؟" ready={changeAnalysis !== null}>
-                    <div
-                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                        style={{ color: C.t4 }}
-                    >
-        
-                    </div>
-                </Placeholder>
-
-                {/* TRENDS */}
-                <Placeholder title="الاتجاهات الشهرية" ready={trends.length > 0}>
-                    <div
-                        className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                        style={{ color: C.t4 }}
-                    >
- 
-                    </div>
-                </Placeholder>
-
+                {/* NEXT SECTIONS PLACEHOLDERS */}
                 <div className="grid lg:grid-cols-2 gap-5">
-                    {/* CONCENTRATION */}
-                    <Placeholder title="تركيز المصاريف" ready={concentration !== null}>
-                        <div
-                            className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                            style={{ color: C.t4 }}
+                    {nextSections.map((section) => (
+                        <Panel
+                            key={section.title}
+                            title={section.title}
+                            badge={section.ready ? 'READY' : 'PENDING'}
                         >
-                    
-                        </div>
-                    </Placeholder>
-
-                    {/* INSIGHTS */}
-                    <Placeholder title="التوصيات الذكية" ready={insights.length > 0}>
-                        <div
-                            className={`${F.mono} text-center py-10 text-[0.7rem] tracking-[2px]`}
-                            style={{ color: C.t4 }}
-                        >
-     
-                        </div>
-                    </Placeholder>
+                            <EmptyState>
+                                {section.message}
+                            </EmptyState>
+                        </Panel>
+                    ))}
                 </div>
             </div>
         </AuthenticatedLayout>
