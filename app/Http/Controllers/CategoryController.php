@@ -32,6 +32,7 @@ class CategoryController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorize('create' , Category::class) ;
         $validated = $request->validate([
             'name'      => ['required', 'string', 'max:30'],
             'icon'      => ['nullable', 'string', 'max:50'],
@@ -48,10 +49,7 @@ class CategoryController extends Controller
 
     public function update(Request $request, Category $category)
     {
-        /* ★ حماية: لا يمكن تعديل إلا التصنيفات المخصصة للمستخدم */
-        if ($category->user_id !== $request->user()->id) {
-            abort(403, 'غير مصرح بتعديل هذا التصنيف');
-        }
+        $this->authorize('update' ,$category) ;
 
         $validated = $request->validate([
             'name'      => ['required', 'string', 'max:30'],
@@ -69,7 +67,7 @@ class CategoryController extends Controller
 
     public function destroy(Request $request, Category $category)
     {
-        /* ★ حماية ثلاثية: ملكية + غير نظامي */
+   
         if ($category->is_system) {
             return redirect()->back()->with([
                 'success' => false,
@@ -77,9 +75,7 @@ class CategoryController extends Controller
             ]);
         }
 
-        if ($category->user_id !== $request->user()->id) {
-            abort(403, 'غير مصرح بحذف هذا التصنيف');
-        }
+        $this->authorize('delete' , $category) ;
 
         $category->delete();
 
