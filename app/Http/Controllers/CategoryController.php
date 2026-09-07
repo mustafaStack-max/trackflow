@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\CategoryRequest;
 use App\Models\Category;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -30,16 +31,10 @@ class CategoryController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store( CategoryRequest $request)
     {
         $this->authorize('create' , Category::class) ;
-        $validated = $request->validate([
-            'name'      => ['required', 'string', 'max:30'],
-            'icon'      => ['nullable', 'string', 'max:50'],
-            'color_hex' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
-        ]);
-
-        $request->user()->categories()->create($validated);
+        $request->user()->categories()->create($request->validated());
 
         return redirect()->back()->with([
             'success' => true,
@@ -47,17 +42,10 @@ class CategoryController extends Controller
         ]);
     }
 
-    public function update(Request $request, Category $category)
+    public function update(CategoryRequest $request, Category $category)
     {
         $this->authorize('update' ,$category) ;
-
-        $validated = $request->validate([
-            'name'      => ['required', 'string', 'max:30'],
-            'icon'      => ['nullable', 'string', 'max:50'],
-            'color_hex' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
-        ]);
-
-        $category->update($validated);
+        $category->update($request->validated());
 
         return redirect()->back()->with([
             'success' => true,
@@ -78,6 +66,13 @@ class CategoryController extends Controller
         $this->authorize('delete' , $category) ;
 
         $category->delete();
+        if ($category->transactions()->exists()) {
+            return redirect()->back()->with([
+                'success' => false,
+                'message' => 'لا يمكن حذف تصنيف مرتبط بعمليات ',
+            ]);
+        }
+
 
         return redirect()->back()->with([
             'success' => true,
