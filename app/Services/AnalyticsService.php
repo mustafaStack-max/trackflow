@@ -11,47 +11,63 @@ use Illuminate\Support\Facades\DB;
 class AnalyticsService
 {
 
-public function build(User $user, ?string $range = null, ?string $from = null, ?string $to = null): array
-{
-    $meta = DateRangeResolver::resolveWithMeta($range, $from, $to);
+       public function build(User $user, ?string $range = null, ?string $from = null, ?string $to = null): array
+    {
+        $meta = DateRangeResolver::resolveWithMeta($range, $from, $to);
 
-    $overview = $this->overview($user, $meta);
-    $changeAnalysis = $this->changeAnalysis($user, $meta);
-    $trends = $this->trends($user, $meta);
-    $concentration = $this->concentration($user, $meta);
+        $overview = $this->overview($user, $meta);
+        $changeAnalysis = $this->changeAnalysis($user, $meta);
+        
 
-    return [
-        'range' => $meta['range'],
-        'customFrom' => $meta['from'],
-        'customTo' => $meta['to'],
+        $flow = $this->flowSeries($user, $meta); 
+        $concentration = $this->concentration($user, $meta);
+        $wealth = $this->wealthFlow($user, $meta);
 
-        'periodLabel' => $meta['period_label'],
-        'previousPeriodLabel' => $meta['previous_label'],
+ 
+        $trends = [];
+        for ($i = 2; $i >= 0; $i--) {
+            $mStart = Carbon::now()->subMonthsNoOverflow($i)->startOfMonth();
+            $mEnd = $mStart->copy()->endOfMonth();
+            $totals = $this->periodTotals($user, $mStart, $mEnd);
+            $inc = (float) ($totals->get('income')?->total ?? 0);
+            $exp = (float) ($totals->get('expense')?->total ?? 0);
+            $trends[] = ['net' => $inc - $exp, 'income' => $inc, 'expense' => $exp];
+        }
 
-        'period' => [
-            'from' => $meta['period_from'],
-            'to' => $meta['period_to'],
-            'days' => $meta['days'],
-            'prevFrom' => $meta['previous_since']->format('Y-m-d'),
-            'prevTo' => $meta['previous_until']->format('Y-m-d'),
-        ],
+        return [
+            'range' => $meta['range'],
+            'customFrom' => $meta['from'],
+            'customTo' => $meta['to'],
 
-        'overview' => $overview,
-        'changeAnalysis' => $changeAnalysis,
-        'trends' => $trends,
-        'concentration' => $concentration,
-        'wealth' => $this->wealthSeries($user, $meta),
+            'periodLabel' => $meta['period_label'],
+            'previousPeriodLabel' => $meta['previous_label'],
 
-        'insights' => $this->insights(
-            $user,
-            $meta,
-            $overview,
-            $changeAnalysis,
-            $concentration,
-            $trends
-        ),
-    ];
-}
+            'period' => [
+                'from' => $meta['period_from'],
+                'to' => $meta['period_to'],
+                'days' => $meta['days'],
+                'prevFrom' => $meta['previous_since']->format('Y-m-d'),
+                'prevTo' => $meta['previous_until']->format('Y-m-d'),
+            ],
+
+            'overview' => $overview,
+            'changeAnalysis' => $changeAnalysis,
+            
+   
+            'flow' => $flow, 
+            'concentration' => $concentration,
+            'wealth' => $wealth,
+
+            'insights' => $this->insights(
+                $user,
+                $meta,
+                $overview,
+                $changeAnalysis,
+                $concentration,
+                $trends 
+            ),
+        ];
+    }
 
 
     protected function overview(User $user, array $meta): array
@@ -290,62 +306,6 @@ protected function changeAnalysis(User $user, array $meta): array
 }
 
 
-/**
- * T6 — الاتجاهات الشهرية.
- */
-protected function trends(User $user, array $meta): array
-{
-    [$start, $end] = $this->trendBounds($meta);
-
-    $monthExpression = $this->monthExpression();
-
-    $rows = $user->transactions()
-        ->whereBetween('transactions.transaction_date', [$start, $end])
-        ->selectRaw("
-            {$monthExpression} as month,
-            transactions.type,
-            COALESCE(SUM(transactions.amount), 0) as total,
-            COUNT(transactions.id) as tx_count
-        ")
-        ->groupBy(DB::raw($monthExpression), 'transactions.type')
-        ->get()
-        ->groupBy('month');
-
-    $result = [];
-
-    $cursor = $start->copy()->startOfMonth();
-
-    while ($cursor->lte($end)) {
-        $key = $cursor->format('Y-m');
-
-        $monthRows = $rows->get($key, collect());
-
-        $income = (float) $monthRows->where('type', 'income')->sum('total');
-        $expense = (float) $monthRows->where('type', 'expense')->sum('total');
-        $txCount = (int) $monthRows->sum('tx_count');
-
-        $net = $income - $expense;
-
-        $result[] = [
-            'month' => $key,
-            'label' => $this->monthLabel($cursor),
-
-            'income' => round($income, 2),
-            'expense' => round($expense, 2),
-            'net' => round($net, 2),
-
-            'savingsRate' => $income > 0
-                ? round(($net / $income) * 100, 1)
-                : null,
-
-            'txCount' => $txCount,
-        ];
-
-        $cursor->addMonthNoOverflow();
-    }
-
-    return $result;
-}
 
 
 /**
@@ -737,138 +697,194 @@ protected function monthLabel(Carbon $date): string
     return $months[$date->month] . ' ' . $date->year;
 }
 
-/**
- * تطور الثروة: إجمالي الأرصدة في نهاية كل شهر.
- *
- * المنطق (الخصم العكسي):
- * الرصيد في تاريخ D = الرصيد الحالي − الدخل بعد D + المصاريف بعد D
- */
-protected function wealthSeries(User $user, array $meta): array
-{
-    [$start, $end] = $this->trendBounds($meta);
-
-    $accounts = $user->accounts()->get(['id', 'balance', 'created_at']);
-
-    if ($accounts->isEmpty()) {
-        return ['current' => 0.0, 'points' => [], 'growth' => null];
-    }
-
-    $currentTotal = round((float) $accounts->sum('balance'), 2);
-
-    $monthExpr = $this->monthExpression();
-
  
-    $rows = $user->transactions()
-        ->where('transactions.transaction_date', '>=', $start)
-        ->selectRaw("
-            transactions.account_id as account_id,
-            {$monthExpr} as month,
-            COALESCE(SUM(CASE WHEN transactions.type = 'income' THEN transactions.amount ELSE 0 END), 0) as income,
-            COALESCE(SUM(CASE WHEN transactions.type = 'expense' THEN transactions.amount ELSE 0 END), 0) as expense
-        ")
-        ->groupBy('transactions.account_id', DB::raw($monthExpr))
-        ->get();
-
-    $perAccount = [];
-
-    foreach ($rows as $r) {
-        $perAccount[(int) $r->account_id][$r->month] = [
-            (float) $r->income,
-            (float) $r->expense,
-        ];
+        /**
+     * تعبير اليوم حسب نوع قاعدة البيانات.
+     */
+    protected function dayExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'pgsql' => "to_char(transactions.transaction_date, 'YYYY-MM-DD')",
+            'sqlite' => "date(transactions.transaction_date)",
+            'sqlsrv' => "CAST(transactions.transaction_date AS DATE)",
+            default => "DATE(transactions.transaction_date)",
+        };
     }
 
-    $months = [];
-    $cursor = $start->copy()->startOfMonth();
+    /**
+     * ★ تدفقات يومية داخل النطاق المختار:
+     *   دخل / مصروف / صافي / تراكمي — لكل يوم.
+     *   الواجهة هي من يختار دقة العرض (يومي/أسبوعي/15 يوم/شهري/ربع/سنوي).
+     */
+    protected function flowSeries(User $user, array $meta): array
+    {
+        $start = $meta['since'];
+        $end = $meta['until'];
+        $dayExpr = $this->dayExpression();
 
-    while ($cursor->lte($end)) {
-        $months[] = $cursor->format('Y-m');
-        $cursor->addMonthNoOverflow();
-    }
+        $rows = $user->transactions()
+            ->whereBetween('transactions.transaction_date', [$start, $end])
+            ->selectRaw("
+                {$dayExpr} as day,
+                transactions.type,
+                COALESCE(SUM(transactions.amount), 0) as total
+            ")
+            ->groupBy(DB::raw($dayExpr), 'transactions.type')
+            ->get()
+            ->groupBy('day');
 
-  
-    $now = Carbon::now();
+        $points = [];
+        $cumulative = 0;
+        $cursor = $start->copy()->startOfDay();
 
-    $points = [
-        [
-            'key' => 'start',
-            'label' => 'بداية الفترة',
-            'date' => $start->copy(),
-        ],
-    ];
+        while ($cursor->lte($end)) {
+            $key = $cursor->format('Y-m-d');
+            $r = $rows->get($key, collect());
 
-    foreach ($months as $m) {
-        $monthDate = Carbon::createFromFormat('Y-m', $m);
-        $isCurrent = $monthDate->endOfMonth()->gt($now);
+            $income = (float) $r->where('type', 'income')->sum('total');
+            $expense = (float) $r->where('type', 'expense')->sum('total');
+            $net = $income - $expense;
+            $cumulative += $net;
 
-        $points[] = [
-            'key' => $m,
-            'label' => $this->monthLabel($monthDate) . ($isCurrent ? ' · حتى اليوم' : ''),
-            'date' => $monthDate->endOfMonth(),
-        ];
-    }
+            $points[] = [
+                'date' => $key,
+                'income' => round($income, 2),
+                'expense' => round($expense, 2),
+                'net' => round($net, 2),
+                'cumulative' => round($cumulative, 2),
+            ];
 
-    $totals = array_fill(0, count($points), 0.0);
-
-    foreach ($accounts as $acc) {
-        $current = (float) $acc->balance;
-        $createdAt = $acc->created_at?->startOfDay();
-
-      
-        $n = count($months);
-        $suffixIncome = array_fill(0, $n + 1, 0.0);
-        $suffixExpense = array_fill(0, $n + 1, 0.0);
-
-        for ($j = $n - 1; $j >= 0; $j--) {
-            [$inc, $exp] = $perAccount[$acc->id][$months[$j]] ?? [0.0, 0.0];
-            $suffixIncome[$j] = $suffixIncome[$j + 1] + $inc;
-            $suffixExpense[$j] = $suffixExpense[$j + 1] + $exp;
+            $cursor->addDay();
         }
 
-        foreach ($points as $i => $p) {
-     
-            if ($createdAt && $p['date']->lt($createdAt)) {
-                continue;
-            }
+        return $points;
+    }
 
-            if ($p['key'] === 'start') {
-                $balance = $current - $suffixIncome[0] + $suffixExpense[0];
-            } else {
-                $j = array_search($p['key'], $months, true);
-                $balance = $current - $suffixIncome[$j + 1] + $suffixExpense[$j + 1];
-            }
+    /**
+     * ★ تطور الثروة اليومي لكل حساب داخل النطاق المختار.
+     *
+     * - كل حساب يبدأ من رصيده عند بداية النطاق:
+     *     الرصيد الابتدائي + صافي العمليات قبل بداية النطاق.
+     * - النقاط "متفرقة" (فقط الأيام التي تغير فيها الرصيد) + نقطة البداية + نقطة النهاية،
+     *   والواجهة ترسمها كخطوات (step) أو تجمّعها بأي دقة مختارة (آخر قيمة في كل وعاء).
+     */
+    protected function wealthFlow(User $user, array $meta): array
+    {
+        $accounts = $user->accounts()->get();
 
-            $totals[$i] += $balance;
+        if ($accounts->isEmpty()) {
+            return ['lines' => [], 'points' => [], 'current' => 0.0, 'start' => 0.0];
         }
-    }
 
-    $result = [];
-    $prev = null;
+        $start = $meta['since'];
+        $end = $meta['until'];
 
-    foreach ($points as $i => $p) {
-        $balance = round($totals[$i], 2);
+        /* صافي كل العمليات لكل حساب (كل الأزمنة) — لاشتقاق الرصيد الابتدائي إن غاب العمود */
+        $allNet = $user->transactions()
+            ->selectRaw("
+                account_id,
+                COALESCE(SUM(CASE WHEN transactions.type = 'income' THEN transactions.amount ELSE -transactions.amount END), 0) as net
+            ")
+            ->groupBy('account_id')
+            ->pluck('net', 'account_id');
 
-        $result[] = [
-            'month' => $p['key'],
-            'label' => $p['label'],
-            'balance' => $balance,
-            'change' => $prev !== null ? round($balance - $prev, 2) : null,
+        $initials = [];
+        foreach ($accounts as $a) {
+            $initials[$a->id] = $a->initial_balance !== null
+                ? (float) $a->initial_balance
+                : (float) $a->balance - (float) ($allNet[$a->id] ?? 0);
+        }
+
+        /* صافي العمليات قبل بداية النطاق → الرصيد عند افتتاح النطاق */
+        $preNet = $user->transactions()
+            ->where('transactions.transaction_date', '<', $start)
+            ->selectRaw("
+                account_id,
+                COALESCE(SUM(CASE WHEN transactions.type = 'income' THEN transactions.amount ELSE -transactions.amount END), 0) as net
+            ")
+            ->groupBy('account_id')
+            ->pluck('net', 'account_id');
+
+        $running = [];
+        foreach ($accounts as $a) {
+            $running[$a->id] = $initials[$a->id] + (float) ($preNet[$a->id] ?? 0);
+        }
+
+        /* صافي كل يوم لكل حساب داخل النطاق */
+        $dayExpr = $this->dayExpression();
+
+        $rows = $user->transactions()
+            ->whereBetween('transactions.transaction_date', [$start, $end])
+            ->selectRaw("
+                {$dayExpr} as day,
+                transactions.account_id,
+                COALESCE(SUM(CASE WHEN transactions.type = 'income' THEN transactions.amount ELSE -transactions.amount END), 0) as net
+            ")
+            ->groupBy(DB::raw($dayExpr), 'transactions.account_id')
+            ->get();
+
+        $byDay = [];
+        foreach ($rows as $r) {
+            $byDay[$r->day][(int) $r->account_id] = (float) $r->net;
+        }
+
+        /* بناء النقاط: بداية + أيام التغيير فقط + النهاية */
+        $makePoint = function (string $date) use (&$running, $accounts) {
+            $point = ['date' => $date];
+            $total = 0.0;
+            foreach ($accounts as $a) {
+                $point['acc_' . $a->id] = round($running[$a->id], 2);
+                $total += $running[$a->id];
+            }
+            $point['total'] = round($total, 2);
+            return $point;
+        };
+
+        $points = [];
+
+        // نقطة افتتاح النطاق (قبل أي حركة داخله)
+        $open = $makePoint($start->copy()->startOfDay()->format('Y-m-d'));
+        $points[] = $open;
+
+        $cursor = $start->copy()->startOfDay();
+        $lastEmitted = $open['date'];
+
+        while ($cursor->lte($end)) {
+            $key = $cursor->format('Y-m-d');
+            $dayNets = $byDay[$key] ?? [];
+
+            if ($dayNets) {
+                foreach ($dayNets as $accId => $net) {
+                    if (isset($running[$accId])) {
+                        $running[$accId] += $net;
+                    }
+                }
+
+                $points[] = $makePoint($key);
+                $lastEmitted = $key;
+            }
+
+            $cursor->addDay();
+        }
+
+        // نضمن نقطة أخيرة عند نهاية النطاق (حتى لو لم تكن هناك حركة)
+        if ($lastEmitted !== $end->format('Y-m-d')) {
+            $points[] = $makePoint($end->format('Y-m-d'));
+        }
+
+        $lines = $accounts->map(fn ($a) => [
+            'key' => 'acc_' . $a->id,
+            'name' => $a->name,
+            'color' => $a->color_hex,
+        ])->values()->toArray();
+
+        $lines[] = ['key' => 'total', 'name' => 'الثروة الإجمالية', 'color' => '#ffc107'];
+
+        return [
+            'lines' => $lines,
+            'points' => $points,
+            'current' => round((float) $accounts->sum('balance'), 2),
+            'start' => $open['total'],
         ];
-
-        $prev = $balance;
     }
-
-    $first = $result[0]['balance'] ?? 0.0;
-
-    return [
-        'current' => $currentTotal,
-        'points' => $result,
-        'growth' => [
-            'abs' => round($currentTotal - $first, 2),
-            'pct' => $first > 0
-                ? round((($currentTotal - $first) / $first) * 100, 1)
-                : null,
-        ],
-    ];
-}
 }

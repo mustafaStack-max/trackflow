@@ -1,15 +1,22 @@
+import { useEffect, useState } from 'react';
 import { Head, router } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Panel from '@/Components/Dashboard/Panel';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
+import { fmtMAD } from '@/Components/Dashboard/format';
 
 import AnalyticsHeader from '@/Components/Analytics/AnalyticsHeader';
 import AnalyticsKpis from '@/Components/Analytics/AnalyticsKpis';
 import ChangeAnalysisTable from '@/Components/Analytics/ChangeAnalysisTable';
-import TrendChart from '@/Components/Analytics/TrendChart';
 import ConcentrationPanel from '@/Components/Analytics/ConcentrationPane';
 import InsightsList from '@/Components/Analytics/InsightsList';
 import AnalyticsTrendsPanel from '@/Components/Analytics/Atp';
+
+/* ★ ألوان شريط الحالة تُقرأ لحظة الرسم (تدعم الثيمين) */
+const BANNER = {
+    danger: { color: C.red, border: `${C.red}66`, bg: `${C.red}0d`, icon: '⚠' },
+    warning: { color: C.amber, border: `${C.amber}66`, bg: `${C.amber}0d`, icon: '△' },
+};
 
 export default function Analytics({
     range = '90d',
@@ -20,11 +27,27 @@ export default function Analytics({
     period = {},
     overview = null,
     changeAnalysis = null,
-    trends = [],
+    flow = [],
     concentration = null,
     wealth = null,
     insights = [],
 }) {
+    /* ★ مؤشر تحميل خفيف عند تغيير الفترة */
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const onStart = () => setLoading(true);
+        const onFinish = () => setLoading(false);
+
+        router.on('start', onStart);
+        router.on('finish', onFinish);
+
+        return () => {
+            router.off('start', onStart);
+            router.off('finish', onFinish);
+        };
+    }, []);
+
     const handleRangeChange = (newRange, newCustom = null) => {
         router.get(
             route('analytics.index'),
@@ -45,7 +68,7 @@ export default function Analytics({
                     'period',
                     'overview',
                     'changeAnalysis',
-                    'trends',
+                    'flow',
                     'concentration',
                     'wealth',
                     'insights',
@@ -54,11 +77,23 @@ export default function Analytics({
         );
     };
 
+    /* ★ أخطر إشارة تظهر أولًا في شريط الحالة */
+    const topInsight =
+        insights.find((i) => i.type === 'danger') ||
+        insights.find((i) => i.type === 'warning') ||
+        null;
+
+    const cfg = topInsight ? BANNER[topInsight.type] : null;
+
     return (
         <AuthenticatedLayout>
             <Head title="التحليلات" />
 
-            <div dir="rtl" className="flex flex-col gap-5">
+            <div
+                dir="rtl"
+                className="flex flex-col gap-5 transition-opacity duration-200"
+                style={{ opacity: loading ? 0.55 : 1, pointerEvents: loading ? 'none' : 'auto' }}
+            >
                 {/* HEADER + FILTERS */}
                 <AnalyticsHeader
                     range={range}
@@ -69,6 +104,26 @@ export default function Analytics({
                     period={period}
                     onRangeChange={handleRangeChange}
                 />
+
+                {/* ★ شريط الحالة: أخطر توصية في أعلى الصفحة */}
+                {topInsight && cfg && (
+                    <div
+                        className="flex items-start gap-3 px-4 py-2.5 border"
+                        style={{ borderColor: cfg.border, background: cfg.bg }}
+                    >
+                        <span className={`${F.mono} text-[0.85rem] font-bold shrink-0`} style={{ color: cfg.color }}>
+                            {cfg.icon}
+                        </span>
+                        <div className="min-w-0">
+                            <span className={`${F.ar} text-[0.78rem] font-bold`} style={{ color: cfg.color }}>
+                                {topInsight.title}:
+                            </span>{' '}
+                            <span className={`${F.ar} text-[0.72rem]`} style={{ color: C.t2 }}>
+                                {topInsight.message}
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 {/* KPI CARDS */}
                 <AnalyticsKpis
@@ -92,7 +147,7 @@ export default function Analytics({
                             : 'PENDING'
                     }
                     right={
-                        changeAnalysis && changeAnalysis.totalChangePct !== null ? (
+                        changeAnalysis ? (
                             <span
                                 className={`${F.mono} text-[0.75rem] font-bold px-2 py-0.5 border rounded`}
                                 style={{
@@ -101,8 +156,12 @@ export default function Analytics({
                                     background: `${changeAnalysis.direction === 'up' ? C.red : C.green}10`,
                                 }}
                             >
-                                {changeAnalysis.totalChange > 0 ? '+' : ''}
-                                {changeAnalysis.totalChangePct}%
+                                {/* ★ نسبة فقط إذا كان الأساس كبيرًا، وإلا فرق مطلق */}
+                                {Math.abs(changeAnalysis.previousTotal) >= 100 && changeAnalysis.totalChangePct !== null ? (
+                                    <span dir="ltr">{`${changeAnalysis.totalChange > 0 ? '+' : ''}${changeAnalysis.totalChangePct}%`}</span>
+                                ) : (
+                                    <span dir="ltr">{`${changeAnalysis.totalChange > 0 ? '+' : '-'}${fmtMAD(Math.abs(changeAnalysis.totalChange))} MAD`}</span>
+                                )}
                             </span>
                         ) : null
                     }
@@ -110,12 +169,12 @@ export default function Analytics({
                     <ChangeAnalysisTable data={changeAnalysis} />
                 </Panel>
 
-{/* T11 + الثروة: تبويبات الاتجاهات وتطور الثروة */}
-<AnalyticsTrendsPanel
-    trends={trends}
-    wealth={wealth}
-    periodLabel={periodLabel}
-/>
+                {/* T11 + الثروة: تبويبات التدفقات وتطور الثروة */}
+                <AnalyticsTrendsPanel
+                    flow={flow}
+                    wealth={wealth}
+                    periodLabel={periodLabel}
+                />
 
                 {/* T12: تركيز المصاريف + التوصيات الذكية */}
                 <div className="grid lg:grid-cols-2 gap-5">
@@ -134,10 +193,7 @@ export default function Analytics({
                         }
                         right={
                             concentration ? (
-                                <span
-                                    className={`${F.mono} text-[0.6rem] tracking-[1px]`}
-                                    style={{ color: C.t4 }}
-                                >
+                                <span className={`${F.mono} text-[0.6rem] tracking-[1px]`} style={{ color: C.t4 }}>
                                     {concentration.categoriesCount} تصنيف
                                 </span>
                             ) : null
@@ -154,9 +210,9 @@ export default function Analytics({
                                 <span
                                     className={`${F.mono} text-[0.6rem] font-bold tracking-[1px] px-2 py-0.5 border rounded`}
                                     style={{
-                                        borderColor: 'rgba(255,92,92,0.4)',
-                                        color: '#ff5c5c',
-                                        background: 'rgba(255,92,92,0.1)',
+                                        borderColor: `${C.red}66`,
+                                        color: C.red,
+                                        background: `${C.red}1a`,
                                     }}
                                 >
                                     انتبه

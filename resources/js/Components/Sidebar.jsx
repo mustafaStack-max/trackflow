@@ -16,9 +16,10 @@ const NAV_GROUPS = [
         title: 'الإدارة المالية',
         items: [
             /* ★★ مفعّلة الآن — الصفحات موجودة ★★ */
+            { key: 'analytics', label: 'التحليلات', routeName: 'analytics.index', icon: 'chart' },
             { key: 'budgets', label: 'الميزانيات', routeName: 'budgets.index', icon: 'card' },
             { key: 'categories', label: 'التصنيفات', routeName: 'categories.index', icon: 'tag' },
-            { key: 'analytics', label: 'التحليلات', routeName: 'analytics.index', icon: 'chart' },
+            
             /* باقي العناصر تبقى قريبًا */
             { key: 'goals', label: 'الأهداف المالية', routeName: 'goals.index', icon: 'target', soon: true },
             { key: 'audit', label: 'سجل العمليات', routeName: 'audit.index', icon: 'clock', soon: true },

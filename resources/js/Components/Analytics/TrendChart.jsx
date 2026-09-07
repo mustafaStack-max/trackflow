@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { COLORS as C, FONT as F } from '@/Components/Dashboard/theme';
 import { fmtMAD, fmtAxis } from '@/Components/Dashboard/format';
+import { bucketSeries } from '@/Components/Dashboard/aggregate';
 import { EmptyState } from '@/Components/Dashboard/Panel';
 
 
@@ -12,7 +13,6 @@ function TrendTooltip({ active, payload, label }) {
     if (!data) return null;
 
     const netColor = data.net >= 0 ? C.green : C.red;
-    const savingsColor = data.savingsRate >= 0 ? C.green : C.red;
 
     return (
         <div className="border p-3 text-[0.72rem] shadow-[0_8px_30px_rgba(0,0,0,0.6)]" style={{ background: C.card, borderColor: C.bHot }}>
@@ -43,18 +43,23 @@ function TrendTooltip({ active, payload, label }) {
                         </span>
                     </div>
                 </div>
-                <div className="flex items-center justify-between gap-6">
-                    <span className={`${F.ar} text-[0.65rem]`} style={{ color: C.t3 }}>معدل الادخار</span>
-                    <span className={`${F.mono} text-[0.7rem] font-bold`} style={{ color: data.savingsRate !== null ? savingsColor : C.t4 }}>
-                        {data.savingsRate !== null ? `${data.savingsRate}%` : '—'}
-                    </span>
-                </div>
+                {data.cumulative !== undefined && (
+                    <div className="flex items-center justify-between gap-6">
+                        <span className={`${F.ar} text-[0.65rem]`} style={{ color: C.t3 }}>تراكمي</span>
+                        <span className={`${F.mono} text-[0.7rem] font-bold`} style={{ color: C.gold }}>
+                            {fmtMAD(data.cumulative)} MAD
+                        </span>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
-export default function TrendChart({ data = [] }) {
+export default function TrendChart({ flow = [], granularity = 'day' }) {
+
+    const data = useMemo(() => bucketSeries(flow, granularity), [flow, granularity]);
+
     const totals = useMemo(() => {
         if (!data.length) return null;
         
@@ -62,25 +67,19 @@ export default function TrendChart({ data = [] }) {
         const totalExpense = data.reduce((s, d) => s + (d.expense || 0), 0);
         const totalNet = totalIncome - totalExpense;
         
-        const validSavingsRates = data.filter(d => d.savingsRate !== null && d.income > 0);
-        const avgSavingsRate = validSavingsRates.length > 0 
-            ? validSavingsRates.reduce((s, d) => s + d.savingsRate, 0) / validSavingsRates.length 
-            : null;
-        
-        return { totalIncome, totalExpense, totalNet, avgSavingsRate };
+        return { totalIncome, totalExpense, totalNet };
     }, [data]);
 
-    if (!data || data.length === 0 || !totals) {
-        return <EmptyState>// لا توجد بيانات اتجاهات شهرية //</EmptyState>;
+    if (!flow || flow.length === 0 || !totals) {
+        return <EmptyState>// لا توجد بيانات اتجاهات //</EmptyState>;
     }
-
 
     const minNet = Math.min(...data.map(d => d.net), 0);
 
     return (
         <div className="flex flex-col gap-5">
          
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
                 <div className="border p-2.5" style={{ borderColor: C.b, background: C.card2 }}>
                     <div className={`${F.mono} text-[0.55rem] tracking-[1px] mb-1`} style={{ color: C.t4 }}>إجمالي الدخل</div>
                     <div className={`${F.mono} text-[0.9rem] font-bold`} style={{ color: C.green }}>
@@ -99,19 +98,9 @@ export default function TrendChart({ data = [] }) {
                         {totals.totalNet >= 0 ? '+' : ''}{fmtMAD(totals.totalNet)} <span className="text-[0.55rem]">MAD</span>
                     </div>
                 </div>
-                <div className="border p-2.5" style={{ borderColor: C.b, background: C.card2 }}>
-                    <div className={`${F.mono} text-[0.55rem] tracking-[1px] mb-1`} style={{ color: C.t4 }}>متوسط الادخار</div>
-                    <div className={`${F.mono} text-[0.9rem] font-bold`} style={{ 
-                        color: totals.avgSavingsRate !== null 
-                            ? (totals.avgSavingsRate >= 20 ? C.green : totals.avgSavingsRate >= 0 ? C.amber : C.red) 
-                            : C.t4 
-                    }}>
-                        {totals.avgSavingsRate !== null ? `${totals.avgSavingsRate.toFixed(1)}%` : '—'}
-                    </div>
-                </div>
             </div>
 
-        
+    
             <div className="w-full" style={{ height: 340 }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
@@ -122,6 +111,8 @@ export default function TrendChart({ data = [] }) {
                             tick={{ fill: C.t4, fontFamily: 'Share Tech Mono', fontSize: 10 }} 
                             axisLine={{ stroke: C.b }} 
                             tickLine={false} 
+                            interval={data.length > 15 ? Math.ceil(data.length / 8) - 1 : 0}
+                            minTickGap={18}
                         />
                         
                         <YAxis 
@@ -135,7 +126,7 @@ export default function TrendChart({ data = [] }) {
                         
                         <Tooltip content={<TrendTooltip />} cursor={{ fill: C.greenTrace }} />
                         
-                      
+                        
                         <ReferenceLine y={0} stroke={C.t4} strokeDasharray="2 2" strokeWidth={1} />
 
                         <Bar 
