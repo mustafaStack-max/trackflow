@@ -2,19 +2,26 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\RangeQueryRequest;
 use App\Services\AnalyticsService;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class AnalyticsController extends Controller
 {
-    public function index(Request $request, AnalyticsService $analytics)
+    public function __construct(
+        protected AnalyticsService $analytics
+    ) {
+    }
+
+    public function index(RangeQueryRequest $request)
     {
-        $data = $analytics->build(
-            $request->user(),
-            $request->input('range'),
-            $request->input('from'),
-            $request->input('to')
+        [$range, $from, $to] = $request->rangeArguments();
+
+        $data = $this->analytics->build(
+            user: $request->user(),
+            range: $range,
+            from: $from,
+            to: $to
         );
 
         return Inertia::render('Analytics', $data);
