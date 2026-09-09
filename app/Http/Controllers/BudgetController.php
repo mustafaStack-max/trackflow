@@ -2,24 +2,27 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreBudgetRequest;
+use App\Http\Requests\UpdateBudgetRequest;
 use App\Models\Budget;
 use App\Models\Category;
 use App\Services\BudgetService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class BudgetController extends Controller
 {
     public function __construct(protected BudgetService $service)
     {
-        // ★ لا نستخدم authorizeResource — غير متوافق مع Laravel 11+
+        //
     }
 
     public function index(Request $request)
     {
+        $this->authorize('viewAny', Budget::class);
+
         $user = $request->user();
         $month = $request->query('month');
         $anchor = $month && preg_match('/^\d{4}-\d{2}$/', $month)
@@ -44,25 +47,12 @@ class BudgetController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreBudgetRequest $request)
     {
-        $user = $request->user();
+        $this->authorize('create', Budget::class);
 
-        $validated = $request->validate([
-            'category_id' => [
-                'nullable', 'integer',
-                Rule::exists('categories', 'id')->where(fn ($q) => $q->where('user_id', $user->id)->orWhere('is_system', true)),
-            ],
-            'name' => ['nullable', 'string', 'max:40', 'required_without:category_id'],
-            'amount' => ['required', 'numeric', 'min:1', 'max:10000000'],
-            'period' => ['required', Rule::in(Budget::PERIODS)],
-            'rollover_enabled' => ['required', 'boolean'],
-            'warn_pct' => ['required', 'numeric', 'min:10', 'max:100'],
-            'critical_pct' => ['required', 'numeric', 'min:11', 'max:200', 'gt:warn_pct'],
-        ], [
-            'critical_pct.gt' => 'يجب أن تكون نسبة الحرجة أعلى من نسبة التحذير.',
-            'amount.min' => 'الحد الأدنى يجب أن يكون 1 MAD على الأقل.',
-        ]);
+        $user = $request->user();
+        $validated = $request->validated();
 
         $exists = Budget::withoutTrashed()
             ->where('user_id', $user->id)
@@ -81,44 +71,27 @@ class BudgetController extends Controller
         return back()->with('success', 'تم إنشاء الميزانية بنجاح');
     }
 
-    public function update(Request $request, Budget $budget)
+    public function update(UpdateBudgetRequest $request, Budget $budget)
     {
-        // ★ تحقق الملكية يدويًا (Laravel 11+)
-        if ($budget->user_id !== $request->user()->id) {
-            abort(403, 'غير مصرح بتعديل هذه الميزانية');
-        }
+        $this->authorize('update', $budget);
 
-        $validated = $request->validate([
-            'name' => ['nullable', 'string', 'max:40'],
-            'amount' => ['required', 'numeric', 'min:1', 'max:10000000'],
-            'period' => ['required', Rule::in(Budget::PERIODS)],
-            'rollover_enabled' => ['required', 'boolean'],
-            'warn_pct' => ['required', 'numeric', 'min:10', 'max:100'],
-            'critical_pct' => ['required', 'numeric', 'min:11', 'max:200', 'gt:warn_pct'],
-        ]);
-
-        $budget->update($validated);
+        $budget->update($request->validated());
 
         return back()->with('success', 'تم تحديث الميزانية');
     }
 
     public function destroy(Request $request, Budget $budget)
     {
-        // ★ تحقق الملكية يدويًا (Laravel 11+)
-        if ($budget->user_id !== $request->user()->id) {
-            abort(403, 'غير مصرح بحذف هذه الميزانية');
-        }
+        $this->authorize('delete', $budget);
 
         $budget->delete();
+        
         return back()->with('success', 'تم حذف الميزانية');
     }
-
-    /**
-     * ★ API للاقتراح الذكي: متوسط آخر 3 أشهر
-     * GET /budgets/suggest?category_id=X
-     */
     public function suggest(Request $request)
     {
+        $this->authorize('viewAny', Budget::class);
+
         $validated = $request->validate([
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
         ]);
